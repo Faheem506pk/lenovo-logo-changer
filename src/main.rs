@@ -49,6 +49,8 @@ struct LogoOperationResult {
     enable: u8,
     lbldesp_var: [u8; 10],
     lbldvc_var: [u8; 40],
+    lbl_only_mode: bool,
+    lbl_var_val: u8,
 }
 
 // 在后台线程执行设置Logo操作
@@ -57,6 +59,8 @@ fn perform_set_logo_operation(
     show_loading_icon: bool,
     lbldesp_var: [u8; 10],
     lbldvc_var: [u8; 40],
+    lbl_only_mode: bool,
+    lbl_var_val: u8,
 ) -> LogoOperationResult {
     // 先设置加载图标
     let loading_icon_result = NativePlatform::set_loading_icon(show_loading_icon);
@@ -70,11 +74,16 @@ fn perform_set_logo_operation(
 
     // 执行设置Logo操作
     let mut temp_info = PlatformInfo::default();
-    temp_info.lbldesp_var = lbldesp_var;
-    temp_info.lbldvc_var = lbldvc_var;
-    temp_info.width = u32::from_le_bytes(lbldesp_var[1..5].try_into().unwrap());
-    temp_info.height = u32::from_le_bytes(lbldesp_var[5..9].try_into().unwrap());
-    temp_info.version = u32::from_le_bytes(lbldvc_var[0..4].try_into().unwrap());
+    temp_info.lbl_only_mode = lbl_only_mode;
+    if !lbl_only_mode {
+        temp_info.lbldesp_var = lbldesp_var;
+        temp_info.lbldvc_var = lbldvc_var;
+        temp_info.width = u32::from_le_bytes(lbldesp_var[1..5].try_into().unwrap());
+        temp_info.height = u32::from_le_bytes(lbldesp_var[5..9].try_into().unwrap());
+        temp_info.version = u32::from_le_bytes(lbldvc_var[0..4].try_into().unwrap());
+    } else {
+        temp_info.lbl_var_val = lbl_var_val;
+    }
 
     let success = temp_info.set_logo(&img_path);
 
@@ -94,6 +103,8 @@ fn perform_set_logo_operation(
         enable: updated_info.enable,
         lbldesp_var: updated_info.lbldesp_var,
         lbldvc_var: updated_info.lbldvc_var,
+        lbl_only_mode: updated_info.lbl_only_mode,
+        lbl_var_val: updated_info.lbl_var_val,
     }
 }
 
@@ -101,6 +112,8 @@ fn perform_set_logo_operation(
 fn perform_restore_logo_operation(
     lbldesp_var: [u8; 10],
     lbldvc_var: [u8; 40],
+    lbl_only_mode: bool,
+    lbl_var_val: u8,
 ) -> LogoOperationResult {
     // 设置加载图标为启用
     let loading_icon_result = NativePlatform::set_loading_icon(true);
@@ -114,9 +127,14 @@ fn perform_restore_logo_operation(
 
     // 执行恢复Logo操作
     let mut temp_info = PlatformInfo::default();
-    temp_info.lbldesp_var = lbldesp_var;
-    temp_info.lbldvc_var = lbldvc_var;
-    temp_info.version = u32::from_le_bytes(lbldvc_var[0..4].try_into().unwrap());
+    temp_info.lbl_only_mode = lbl_only_mode;
+    if !lbl_only_mode {
+        temp_info.lbldesp_var = lbldesp_var;
+        temp_info.lbldvc_var = lbldvc_var;
+        temp_info.version = u32::from_le_bytes(lbldvc_var[0..4].try_into().unwrap());
+    } else {
+        temp_info.lbl_var_val = lbl_var_val;
+    }
 
     let success = temp_info.restore_logo();
 
@@ -136,6 +154,8 @@ fn perform_restore_logo_operation(
         enable: updated_info.enable,
         lbldesp_var: updated_info.lbldesp_var,
         lbldvc_var: updated_info.lbldvc_var,
+        lbl_only_mode: updated_info.lbl_only_mode,
+        lbl_var_val: updated_info.lbl_var_val,
     }
 }
 
@@ -262,6 +282,7 @@ impl MyApp {
                 if let Some(picked_path) = &self.picked_path {
                     if self.platform_info.version == 0x20003
                         || self.platform_info.version == 0x20000
+                        || self.platform_info.lbl_only_mode
                     {
                         ui.horizontal(|ui| {
                             ui.label(t(lang, "picked_image").as_ref());
@@ -290,6 +311,8 @@ impl MyApp {
                             let show_loading_icon = self.set_loading_icon;
                             let lbldesp_var = self.platform_info.lbldesp_var;
                             let lbldvc_var = self.platform_info.lbldvc_var;
+                            let lbl_only_mode = self.platform_info.lbl_only_mode;
+                            let lbl_var_val = self.platform_info.lbl_var_val;
 
                             // 在后台线程执行操作
                             self.set_logo_promise =
@@ -299,6 +322,8 @@ impl MyApp {
                                         show_loading_icon,
                                         lbldesp_var,
                                         lbldvc_var,
+                                        lbl_only_mode,
+                                        lbl_var_val,
                                     )
                                 }));
                             self.pending_set_logo = false;
@@ -316,6 +341,8 @@ impl MyApp {
                                 self.platform_info.enable = result.enable;
                                 self.platform_info.lbldesp_var = result.lbldesp_var;
                                 self.platform_info.lbldvc_var = result.lbldvc_var;
+                                self.platform_info.lbl_only_mode = result.lbl_only_mode;
+                                self.platform_info.lbl_var_val = result.lbl_var_val;
 
                                 // 清除Promise
                                 self.set_logo_promise = None;
@@ -358,11 +385,18 @@ impl MyApp {
                     // 捕获需要的数据
                     let lbldesp_var = self.platform_info.lbldesp_var;
                     let lbldvc_var = self.platform_info.lbldvc_var;
+                    let lbl_only_mode = self.platform_info.lbl_only_mode;
+                    let lbl_var_val = self.platform_info.lbl_var_val;
 
                     // 在后台线程执行操作
                     self.restore_logo_promise =
                         Some(Promise::spawn_thread("restore_logo", move || {
-                            perform_restore_logo_operation(lbldesp_var, lbldvc_var)
+                            perform_restore_logo_operation(
+                                lbldesp_var,
+                                lbldvc_var,
+                                lbl_only_mode,
+                                lbl_var_val,
+                            )
                         }));
                     self.pending_restore_logo = false;
                 }
@@ -379,7 +413,9 @@ impl MyApp {
                         self.platform_info.enable = result.enable;
                         self.platform_info.lbldesp_var = result.lbldesp_var;
                         self.platform_info.lbldvc_var = result.lbldvc_var;
-                        self.is_support = result.enable != 0 || result.success;
+                        self.platform_info.lbl_only_mode = result.lbl_only_mode;
+                        self.platform_info.lbl_var_val = result.lbl_var_val;
+                        self.is_support = result.enable != 0 || result.success || result.lbl_only_mode;
 
                         // 清除Promise
                         self.restore_logo_promise = None;
